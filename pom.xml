@@ -13,6 +13,7 @@
     <description>Insurance-claim microservices workspace</description>
 
     <modules>
+        <module>api-gateway</module>
         <module>service-polices</module>
         <module>service-sinistres</module>
         <module>service-indemnites</module>

@@ -1,0 +1,29 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          routes:
+            - id: policies-service
+              uri: ${POLICIES_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/policies/**
+            - id: claims-service
+              uri: ${CLAIMS_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/claims/**
+            - id: indemnities-service
+              uri: ${INDEMNITIES_SERVICE_URL:http://localhost:8083}
+              predicates:
+                - Path=/api/indemnities/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
