@@ -1,6 +1,6 @@
 # Sinistre-Pro — Team workflow and AI handoff
 
-This file is the shared working agreement for every contributor and their AI assistant. Read it before changing the project.
+This file is the shared working agreement for every contributor and their AI assistant. Read it together with [the cahier des charges](CAHIER_DES_CHARGES.md) before changing the project.
 
 ## Project principles
 
