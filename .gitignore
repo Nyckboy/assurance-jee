@@ -14,3 +14,6 @@ Thumbs.db
 .env
 .env.*
 !*.env.example
+
+# Local service launcher state and logs
+.run/
