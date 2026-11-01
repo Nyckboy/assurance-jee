@@ -11,4 +11,7 @@ public interface ClaimService {
 
     // Retrieves a claim by its unique identifier.
     ClaimFile getClaimById(Long id);
+
+    // Creates a claim after validating insurance coverage.
+    ClaimFile createClaim(ClaimFile claim);
 }
