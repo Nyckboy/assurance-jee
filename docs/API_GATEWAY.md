@@ -14,7 +14,7 @@ The full path is forwarded unchanged. For example, `GET /api/policies/42` reache
 
 ## How target addresses are chosen
 
-The configuration provides local defaults, but environment variables can override them without changing source code:
+The routes are defined in [`config-repo/api-gateway.yml`](../config-repo/api-gateway.yml) and served by the [config server](CONFIG_SERVER.md); the gateway's local `application.yml` only keeps its name, port, and config import. The configuration provides local defaults, but environment variables can override them without changing source code:
 
 ```text
 POLICIES_SERVICE_URL=http://service-polices:8080
@@ -44,7 +44,7 @@ Services communicate directly with each other through the OpenFeign and Kafka fl
 There is deliberately **no `HealthController` Java class** in this project. Spring Boot Actuator creates the endpoint automatically.
 
 - The dependency that provides it is `spring-boot-starter-actuator` in [`api-gateway/pom.xml`](../api-gateway/pom.xml).
-- The HTTP exposure is configured in [`api-gateway/src/main/resources/application.yml`](../api-gateway/src/main/resources/application.yml) under `management.endpoints.web.exposure`.
+- The HTTP exposure is configured in [`config-repo/api-gateway.yml`](../config-repo/api-gateway.yml) under `management.endpoints.web.exposure`.
 - When the gateway runs, visit `http://localhost:8080/actuator/health`. A response of `{"status":"UP"}` means that the gateway itself is running and its configured health checks are passing.
 
 The current gateway health check does not prove that the downstream business services are running. Each service will later expose its own `/actuator/health` endpoint as well.

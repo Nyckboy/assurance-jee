@@ -8,10 +8,11 @@ From the repository root, run:
 .\scripts\start-all.ps1 -WaitForHealth
 ```
 
-The script starts hidden launcher processes for the gateway and all three services. It stores their process IDs under `.run/` and writes output logs to `.run/logs/`; both are ignored by Git.
+The script starts hidden launcher processes for the config server, the gateway, and all three services. It starts the config server first and waits until it is `UP`, because the other applications load their configuration from it (see [the config server documentation](CONFIG_SERVER.md)). It stores their process IDs under `.run/` and writes output logs to `.run/logs/`; both are ignored by Git.
 
 | Application | Port | Health URL |
 | --- | --- | --- |
+| Config server | `8888` | `http://localhost:8888/actuator/health` |
 | API gateway | `8080` | `http://localhost:8080/actuator/health` |
 | Policy service | `8081` | `http://localhost:8081/actuator/health` |
 | Claims service | `8082` | `http://localhost:8082/actuator/health` |
