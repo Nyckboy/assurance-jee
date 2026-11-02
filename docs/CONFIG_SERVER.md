@@ -56,6 +56,14 @@ Merge the latest `main` into your feature branch, then make these two changes in
 
 That is enough to connect. The `optional:` prefix means your service still starts with its local settings when the config server is not running, so this change cannot break your service or your tests.
 
+Recommended: keep your tests independent of a running config server by adding `src/test/resources/config/application.properties` containing:
+
+```properties
+spring.cloud.config.enabled=false
+```
+
+Spring Boot loads that file on top of your normal `application.properties` during tests only.
+
 Then, when you are ready, **you** decide which settings to move into a new `config-repo/<your-service-name>.properties` file (datasource, Kafka, Feign, business settings, ...). Keep `spring.application.name`, `server.port`, and the import line in your local file. Do not keep the same property in both places.
 
 ## Startup order
