@@ -10,6 +10,7 @@ The server uses the `native` profile: it reads plain files from the [`config-rep
 config-repo/
   application.properties        ← shared by every application
   api-gateway.yml               ← only for spring.application.name=api-gateway
+  discovery-server.properties   ← only for spring.application.name=discovery-server
   service-polices.properties    ← only for spring.application.name=service-polices
 ```
 
@@ -26,6 +27,7 @@ You can view what a service receives in a browser, for example `http://localhost
 
 | Application | Connected | Central file |
 | --- | --- | --- |
+| `discovery-server` | Yes | `config-repo/discovery-server.properties` (registry behaviour) |
 | `api-gateway` | Yes | `config-repo/api-gateway.yml` (routes, actuator exposure) |
 | `service-polices` | Yes | `config-repo/service-polices.properties` (H2 datasource, JPA) |
 | `service-sinistres` | Not yet: owner to connect | — |
@@ -81,4 +83,4 @@ In Docker Compose these will become, for example, `CONFIG_SERVER_URL=http://conf
 
 ## Relationship with Eureka
 
-The config server keeps a fixed address and does not register with Eureka. When Eureka is added, its URL (`eureka.client.serviceUrl.defaultZone`) can be set once in the shared `config-repo/application.properties` for all services.
+The config server keeps a fixed address and does not register with Eureka: the other applications need it before they know where Eureka is. The Eureka URL (`eureka.client.service-url.defaultZone`) is set once in the shared `config-repo/application.properties`, so a service connected to the config server only needs the Eureka client dependency to register. See [the discovery server documentation](DISCOVERY_SERVER.md).
