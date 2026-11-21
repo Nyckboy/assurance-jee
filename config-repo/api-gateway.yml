@@ -1,3 +1,4 @@
+# Routes resolve instances from Eureka by service name (lb://<spring.application.name>) and load-balance across them.
 spring:
   cloud:
     gateway:
@@ -5,15 +6,15 @@ spring:
         webmvc:
           routes:
             - id: policies-service
-              uri: ${POLICIES_SERVICE_URL:http://localhost:8081}
+              uri: lb://service-polices
               predicates:
                 - Path=/api/policies/**
             - id: claims-service
-              uri: ${CLAIMS_SERVICE_URL:http://localhost:8082}
+              uri: lb://service-sinistres
               predicates:
                 - Path=/api/claims/**
             - id: indemnities-service
-              uri: ${INDEMNITIES_SERVICE_URL:http://localhost:8083}
+              uri: lb://service-indemnites
               predicates:
                 - Path=/api/indemnities/**
 

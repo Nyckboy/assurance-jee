@@ -17,6 +17,8 @@ New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 
 # The config server starts first: the other applications read their configuration from it at startup.
 $configServer = @{ Name = 'config-server'; Directory = 'config-server'; HealthUrl = 'http://localhost:8888/actuator/health' }
+# The discovery server starts next: the other applications register with it.
+$discoveryServer = @{ Name = 'discovery-server'; Directory = 'discovery-server'; HealthUrl = 'http://localhost:8761/actuator/health' }
 
 $applications = @(
     @{ Name = 'api-gateway'; Directory = 'api-gateway'; HealthUrl = 'http://localhost:8080/actuator/health' },
@@ -70,6 +72,11 @@ try {
         throw 'The config server must be UP before the other applications start.'
     }
 
+    $startedProcesses += Start-Application $discoveryServer
+    if (-not (Wait-ForHealth $startedProcesses[1] 60)) {
+        throw 'The discovery server must be UP before the other applications start.'
+    }
+
     foreach ($application in $applications) {
         $startedProcesses += Start-Application $application
     }
@@ -84,7 +91,7 @@ catch {
 }
 
 if ($WaitForHealth) {
-    foreach ($application in $startedProcesses | Select-Object -Skip 1) {
+    foreach ($application in $startedProcesses | Select-Object -Skip 2) {
         Wait-ForHealth $application | Out-Null
     }
 }
