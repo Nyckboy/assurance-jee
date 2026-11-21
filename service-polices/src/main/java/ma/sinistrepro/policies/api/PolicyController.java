@@ -77,4 +77,9 @@ public class PolicyController {
                                                        @RequestParam String claimType) {
         return policyService.verifyCoverage(policyId, claimType);
     }
+
+    @GetMapping("/{policyId}/claims")
+    public List<PolicyClaimResponse> findPolicyClaims(@PathVariable Long policyId) {
+        return policyService.findPolicyClaims(policyId);
+    }
 }
