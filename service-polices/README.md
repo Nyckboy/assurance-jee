@@ -2,6 +2,8 @@
 
 Owns insurance policies and their guarantees. It runs locally on port `8081` with an in-memory H2 database.
 
+Its datasource and JPA settings are served by the config server from [`config-repo/service-polices.properties`](../config-repo/service-polices.properties); see [the config server documentation](../docs/CONFIG_SERVER.md).
+
 ## Local tools
 
 - H2 console: `http://localhost:8081/h2-console`
