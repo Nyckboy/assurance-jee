@@ -9,6 +9,8 @@ import ma.sinistrepro.policies.api.GuaranteeRequest;
 import ma.sinistrepro.policies.api.PolicyRequest;
 import ma.sinistrepro.policies.api.PolicyResponse;
 import ma.sinistrepro.policies.domain.PolicyStatus;
+import ma.sinistrepro.policies.event.ClaimDeclaredEvent;
+import ma.sinistrepro.policies.repository.PolicyClaimRepository;
 import ma.sinistrepro.policies.repository.PolicyRepository;
 import ma.sinistrepro.policies.service.PolicyService;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,8 +27,12 @@ class PolicyServiceIntegrationTests {
     @Autowired
     private PolicyRepository policyRepository;
 
+    @Autowired
+    private PolicyClaimRepository policyClaimRepository;
+
     @BeforeEach
     void clearDatabase() {
+        policyClaimRepository.deleteAll();
         policyRepository.deleteAll();
     }
 
@@ -55,5 +61,37 @@ class PolicyServiceIntegrationTests {
 
         assertThat(result.covered()).isFalse();
         assertThat(result.reason()).isEqualTo("Policy is not active");
+    }
+
+    @Test
+    void declaredClaimIsRecordedOnceOnItsPolicy() {
+        PolicyResponse policy = createActivePolicy();
+        ClaimDeclaredEvent event = new ClaimDeclaredEvent(12L, policy.id(), "insured@example.com",
+                LocalDate.of(2026, 11, 1), "COLLISION", new BigDecimal("4200.00"));
+
+        assertThat(policyService.recordDeclaredClaim(event)).isTrue();
+        assertThat(policyService.recordDeclaredClaim(event)).isFalse();
+
+        assertThat(policyService.findPolicyClaims(policy.id()))
+                .singleElement()
+                .satisfies(claim -> {
+                    assertThat(claim.claimId()).isEqualTo(12L);
+                    assertThat(claim.montantDeclare()).isEqualByComparingTo("4200.00");
+                });
+    }
+
+    @Test
+    void claimOnUnknownPolicyIsIgnored() {
+        ClaimDeclaredEvent event = new ClaimDeclaredEvent(13L, 999_999L, "insured@example.com",
+                LocalDate.of(2026, 11, 1), "COLLISION", new BigDecimal("4200.00"));
+
+        assertThat(policyService.recordDeclaredClaim(event)).isFalse();
+        assertThat(policyClaimRepository.count()).isZero();
+    }
+
+    private PolicyResponse createActivePolicy() {
+        return policyService.createPolicy(new PolicyRequest(
+                "insured@example.com", "AUTO", new BigDecimal("50000.00"), new BigDecimal("600.00"),
+                LocalDate.of(2026, 1, 1), PolicyStatus.ACTIVE));
     }
 }

@@ -1,16 +1,23 @@
 package ma.sinistrepro.policies.service;
 
+import java.time.Instant;
 import java.util.List;
 import ma.sinistrepro.policies.api.CoverageVerificationResponse;
 import ma.sinistrepro.policies.api.GuaranteeRequest;
 import ma.sinistrepro.policies.api.GuaranteeResponse;
+import ma.sinistrepro.policies.api.PolicyClaimResponse;
 import ma.sinistrepro.policies.api.PolicyRequest;
 import ma.sinistrepro.policies.api.PolicyResponse;
 import ma.sinistrepro.policies.domain.Guarantee;
 import ma.sinistrepro.policies.domain.Policy;
+import ma.sinistrepro.policies.domain.PolicyClaim;
 import ma.sinistrepro.policies.domain.PolicyStatus;
+import ma.sinistrepro.policies.event.ClaimDeclaredEvent;
 import ma.sinistrepro.policies.repository.GuaranteeRepository;
+import ma.sinistrepro.policies.repository.PolicyClaimRepository;
 import ma.sinistrepro.policies.repository.PolicyRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,12 +25,17 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 public class PolicyServiceImpl implements PolicyService {
 
+    private static final Logger log = LoggerFactory.getLogger(PolicyServiceImpl.class);
+
     private final PolicyRepository policyRepository;
     private final GuaranteeRepository guaranteeRepository;
+    private final PolicyClaimRepository policyClaimRepository;
 
-    public PolicyServiceImpl(PolicyRepository policyRepository, GuaranteeRepository guaranteeRepository) {
+    public PolicyServiceImpl(PolicyRepository policyRepository, GuaranteeRepository guaranteeRepository,
+                             PolicyClaimRepository policyClaimRepository) {
         this.policyRepository = policyRepository;
         this.guaranteeRepository = guaranteeRepository;
+        this.policyClaimRepository = policyClaimRepository;
     }
 
     @Override
@@ -94,6 +106,35 @@ public class PolicyServiceImpl implements PolicyService {
                         guarantee.getPlafond(), guarantee.getFranchise()))
                 .orElseGet(() -> new CoverageVerificationResponse(policyId, claimType, false,
                         "No matching guarantee", null, null));
+    }
+
+    @Override
+    public boolean recordDeclaredClaim(ClaimDeclaredEvent event) {
+        if (!policyRepository.existsById(event.policyId())) {
+            log.warn("Ignoring claim {}: policy {} does not exist", event.claimId(), event.policyId());
+            return false;
+        }
+        if (policyClaimRepository.existsByClaimId(event.claimId())) {
+            log.info("Ignoring claim {}: already recorded", event.claimId());
+            return false;
+        }
+
+        policyClaimRepository.save(new PolicyClaim(event.claimId(), event.policyId(), event.souscripteurEmail(),
+                event.dateSinistre(), event.type(), event.montantDeclare(), Instant.now()));
+        // No mail server yet: the notification to the policyholder is logged.
+        log.info("Notification to {}: claim {} ({}, {}) was declared on policy {}", event.souscripteurEmail(),
+                event.claimId(), event.type(), event.dateSinistre(), event.policyId());
+        return true;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<PolicyClaimResponse> findPolicyClaims(Long policyId) {
+        findPolicyEntity(policyId);
+        return policyClaimRepository.findByPolicyIdOrderByDateSinistreDesc(policyId).stream()
+                .map(claim -> new PolicyClaimResponse(claim.getClaimId(), claim.getDateSinistre(), claim.getType(),
+                        claim.getMontantDeclare(), claim.getReceivedAt()))
+                .toList();
     }
 
     private Policy findPolicyEntity(Long policyId) {
