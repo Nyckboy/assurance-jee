@@ -4,8 +4,10 @@ import java.util.List;
 import ma.sinistrepro.policies.api.CoverageVerificationResponse;
 import ma.sinistrepro.policies.api.GuaranteeRequest;
 import ma.sinistrepro.policies.api.GuaranteeResponse;
+import ma.sinistrepro.policies.api.PolicyClaimResponse;
 import ma.sinistrepro.policies.api.PolicyRequest;
 import ma.sinistrepro.policies.api.PolicyResponse;
+import ma.sinistrepro.policies.event.ClaimDeclaredEvent;
 
 public interface PolicyService {
 
@@ -26,4 +28,13 @@ public interface PolicyService {
     void deleteGuarantee(Long policyId, Long guaranteeId);
 
     CoverageVerificationResponse verifyCoverage(Long policyId, String claimType);
+
+    /**
+     * Records a declared claim on its policy and notifies the policyholder.
+     *
+     * @return false when the event was ignored (unknown policy or claim already recorded)
+     */
+    boolean recordDeclaredClaim(ClaimDeclaredEvent event);
+
+    List<PolicyClaimResponse> findPolicyClaims(Long policyId);
 }
