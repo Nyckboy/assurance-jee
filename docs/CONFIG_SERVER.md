@@ -30,7 +30,7 @@ You can view what a service receives in a browser, for example `http://localhost
 | `discovery-server` | Yes | `config-repo/discovery-server.properties` (registry behaviour) |
 | `api-gateway` | Yes | `config-repo/api-gateway.yml` (routes, actuator exposure) |
 | `service-polices` | Yes | `config-repo/service-polices.properties` (H2 datasource, JPA) |
-| `service-sinistres` | Not yet: owner to connect | — |
+| `service-sinistres` | Yes | `config-repo/service-sinistres.properties` (H2 datasource, JPA, Kafka) |
 | `service-indemnites` | Yes | `config-repo/service-indemnites.properties` (Kafka) |
 
 Each connected application keeps only `spring.application.name`, `server.port`, and the config import locally.

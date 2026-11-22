@@ -31,7 +31,7 @@ The instance id makes several instances of one service easy to tell apart on the
 | --- | --- | --- |
 | `api-gateway` | Yes | — |
 | `service-polices` | Yes | `/api/policies/**` → `lb://service-polices` |
-| `service-sinistres` | Not yet: owner to connect | `/api/claims/**` → `lb://service-sinistres` |
+| `service-sinistres` | Yes | `/api/claims/**` → `lb://service-sinistres` |
 | `service-indemnites` | Yes | `/api/indemnities/**` → `lb://service-indemnites` |
 
 Until a service registers, the gateway cannot find any instance of it and that route fails.
