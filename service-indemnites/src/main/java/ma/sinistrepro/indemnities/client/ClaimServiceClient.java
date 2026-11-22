@@ -4,10 +4,7 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 
-@FeignClient(
-        name = "service-sinistres",
-        url = "${services.sinistres.url}"
-)
+@FeignClient(name = "service-sinistres")
 public interface ClaimServiceClient {
 
     @GetMapping("/api/claims/{id}")
