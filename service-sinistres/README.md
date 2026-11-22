@@ -82,6 +82,20 @@ URL de base :
 | POST | `/api/claims/{claimId}/expertises` | Création d'une expertise |
 | GET | `/api/claims/{claimId}/expertises` | Liste des expertises d'un sinistre |
 
+Les requêtes utilisent des DTO validés avec `@Valid` (`ClaimRequest`, `ExpertiseRequest`) et les réponses des DTO (`ClaimResponse`, `ExpertiseResponse`) : les entités JPA ne sont jamais exposées. L'identifiant, le statut et le montant retenu sont fixés par le service, jamais par l'appelant.
+
+⚠️ `service-indemnites` lit `GET /api/claims/{id}` via Feign : ne pas renommer les champs de `ClaimResponse`.
+
+**Erreurs** (centralisées dans `ApiExceptionHandler`, `@RestControllerAdvice`), toujours au format `{"timestamp","status","error","message"}` :
+
+| Statut | Cas |
+|--------|-----|
+| 400 | Champ invalide (`@Valid`, tous les champs fautifs sont listés), JSON illisible, police inexistante |
+| 404 | Sinistre inexistant |
+| 409 | Expertise sur un sinistre qui n'est pas `DECLARE` |
+| 422 | Sinistre non couvert par la police (avec la raison) |
+| 503 | `service-polices` injoignable |
+
 ### 4.1. Déclarer un sinistre
 
 **Requête :**
@@ -358,11 +372,20 @@ Le service `service-indemnites` utilise une table Outbox pour enregistrer ses é
 
 Le consommateur de `service-sinistres` gère les répétitions simples d'événements lorsqu'un sinistre possède déjà le statut `INDEMNISE`.
 
+Un message `indemnity-paid` qui ne pourra jamais être appliqué (JSON illisible, champs manquants, sinistre inconnu, autre police, statut incorrect) est journalisé puis ignoré, au lieu d'être réessayé 10 fois par Kafka.
+
 ## 7. Configuration
 
-Fichier :
+La configuration est servie par le Config Server (voir [`docs/CONFIG_SERVER.md`](../docs/CONFIG_SERVER.md)) :
 
-`src/main/resources/application.properties`
+| Fichier | Contenu |
+|---------|---------|
+| [`config-repo/service-sinistres.properties`](../config-repo/service-sinistres.properties) | Base H2, JPA, console H2, adresse Kafka, `max.block.ms=5000` |
+| `config-repo/application.properties` | Partagé : adresse Eureka (`EUREKA_URL`), nommage des instances, endpoints actuator |
+| `src/main/resources/application.properties` | Nom, port, import du Config Server et sérialiseurs Kafka (liés au code) |
+| `src/test/resources/config/application.properties` | Tests : Config Server et Eureka désactivés |
+
+Avec `max.block.ms=5000`, si Kafka est arrêté, déclarer un sinistre ou enregistrer une expertise attend au plus 5 s (60 s par défaut).
 
 ### Configuration locale
 
@@ -379,38 +402,14 @@ Fichier :
 | Variable | Description |
 |----------|-------------|
 | `KAFKA_BOOTSTRAP_SERVERS` | Adresse du broker Kafka |
-| `EUREKA_SERVER_URL` | Adresse d'enregistrement Eureka |
+| `EUREKA_URL` | Adresse d'enregistrement Eureka (config partagée) |
 | `CONFIG_SERVER_URL` | Adresse du Config Server |
 
 `service-polices` est découvert par son nom de service via Eureka.
 
-La configuration actuelle contient :
-
-```properties
-spring.application.name=service-sinistres
-server.port=8082
-
-spring.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-
-spring.kafka.consumer.group-id=service-sinistres
-spring.kafka.consumer.auto-offset-reset=earliest
-
-eureka.client.service-url.defaultZone=${EUREKA_SERVER_URL:http://localhost:8761/eureka/}
-
-spring.config.import=optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}
-spring.cloud.config.enabled=false
-```
-
-Le client Config Server est désactivé dans la configuration locale actuelle.
-
 ### Base de données
 
-Le service utilise H2 en mémoire :
-
-```properties
-spring.datasource.url=jdbc:h2:mem:claimsdb;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-spring.jpa.hibernate.ddl-auto=update
-```
+Le service utilise H2 en mémoire (`jdbc:h2:mem:claimsdb`, défini dans `config-repo/service-sinistres.properties`).
 
 Les données ne sont pas conservées après l'arrêt du processus.
 
@@ -431,7 +430,8 @@ Ils permettent de tester les événements sans dépendre d'un broker Kafka Docke
 | `ServiceSinistresApplicationTests` | Chargement du contexte Spring |
 | `ClaimDeclaredKafkaIntegrationTest` | Publication d'un sinistre couvert et absence de publication en cas de refus |
 | `ExpertiseCompletedKafkaIntegrationTest` | Publication de l'expertise, validation du contrat JSON et absence d'événement en cas de rejet |
-| `IndemnityPaidKafkaIntegrationTest` | Réception Kafka, passage à `INDEMNISE`, idempotence et vérification du `policyId` |
+| `IndemnityPaidKafkaIntegrationTest` | Réception Kafka, passage à `INDEMNISE`, idempotence, vérification du `policyId` et messages invalides ignorés |
+| `ClaimApiTests` | API REST (MockMvc) : contrat JSON lu par `service-indemnites`, validation `@Valid`, statuts d'erreur 400/404/409/422/503 |
 
 ### Exécuter tous les tests
 
