@@ -26,6 +26,7 @@ Use JDBC URL `jdbc:h2:mem:policiesdb` in the H2 console, username `sa`, and an e
 | `DELETE` | `/api/policies/{policyId}/guarantees/{guaranteeId}` | Delete a guarantee. |
 | `GET` | `/api/policies/{policyId}/coverage?claimType=COLLISION` | Verify an active policy has a matching guarantee. |
 | `GET` | `/api/policies/{policyId}/claims` | List the claims declared on a policy (recorded from `claim-declared`). |
+| `GET` | `/api/policies/{policyId}/premium-adjustments` | List the premium increases applied after paid indemnities (from `indemnity-paid`). |
 
 The coverage endpoint is the contract that `service-sinistres` will consume later through OpenFeign. A valid request always receives `200 OK` with `covered: true` or `covered: false`; an unknown policy receives `404`.
 
@@ -54,6 +55,27 @@ The consumer is deliberately tolerant:
 - a claim on an unknown policy, or an unreadable message, is logged and skipped instead of retried forever.
 
 Renaming or removing one of the six fields requires agreement with the policy owner.
+
+## Kafka: consumes `indemnity-paid`
+
+Published by `service-indemnites` (through its outbox) when an indemnity is paid:
+
+| Item | Value |
+| --- | --- |
+| Topic | `indemnity-paid` |
+| Key | `claimId` as a string |
+| Consumer group | `service-polices` |
+| Payload | `indemnityId`, `claimId`, `policyId`, `montantCalcule` (number), `dateVirement` (ISO date) |
+
+```json
+{"indemnityId":7,"claimId":12,"policyId":3,"montantCalcule":3700.00,"dateVirement":"2026-11-22"}
+```
+
+**Premium rule:** each paid claim raises the policy premium by 10% of its current value, rounded to the cent. For example, 600.00 becomes 660.00, and a second paid claim makes it 726.00. The rate is `policies.premium.increase-rate-per-paid-claim` in [`config-repo/service-polices.properties`](../config-repo/service-polices.properties).
+
+Each increase is stored in the `premium_adjustments` table: claim, indemnity, amount paid, premium before and after. `GET /api/policies/{policyId}/premium-adjustments` lists them. The policyholder is notified (logged for now).
+
+The tolerance rules are the same as for `claim-declared`. A `claimId` already applied is skipped, so a redelivered message never raises the premium twice.
 
 Kafka's address comes from `spring.kafka.bootstrap-servers` in [`config-repo/service-polices.properties`](../config-repo/service-polices.properties) (override with `KAFKA_BOOTSTRAP_SERVERS`, default `localhost:9092`). Without a running Kafka broker the service still starts and serves its API; it only logs connection warnings. The tests use an embedded Kafka broker and need nothing installed.
 

@@ -82,4 +82,9 @@ public class PolicyController {
     public List<PolicyClaimResponse> findPolicyClaims(@PathVariable Long policyId) {
         return policyService.findPolicyClaims(policyId);
     }
+
+    @GetMapping("/{policyId}/premium-adjustments")
+    public List<PremiumAdjustmentResponse> findPremiumAdjustments(@PathVariable Long policyId) {
+        return policyService.findPremiumAdjustments(policyId);
+    }
 }

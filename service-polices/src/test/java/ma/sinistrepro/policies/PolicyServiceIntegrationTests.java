@@ -10,8 +10,10 @@ import ma.sinistrepro.policies.api.PolicyRequest;
 import ma.sinistrepro.policies.api.PolicyResponse;
 import ma.sinistrepro.policies.domain.PolicyStatus;
 import ma.sinistrepro.policies.event.ClaimDeclaredEvent;
+import ma.sinistrepro.policies.event.IndemnityPaidEvent;
 import ma.sinistrepro.policies.repository.PolicyClaimRepository;
 import ma.sinistrepro.policies.repository.PolicyRepository;
+import ma.sinistrepro.policies.repository.PremiumAdjustmentRepository;
 import ma.sinistrepro.policies.service.PolicyService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,9 +32,13 @@ class PolicyServiceIntegrationTests {
     @Autowired
     private PolicyClaimRepository policyClaimRepository;
 
+    @Autowired
+    private PremiumAdjustmentRepository premiumAdjustmentRepository;
+
     @BeforeEach
     void clearDatabase() {
         policyClaimRepository.deleteAll();
+        premiumAdjustmentRepository.deleteAll();
         policyRepository.deleteAll();
     }
 
@@ -87,6 +93,50 @@ class PolicyServiceIntegrationTests {
 
         assertThat(policyService.recordDeclaredClaim(event)).isFalse();
         assertThat(policyClaimRepository.count()).isZero();
+    }
+
+    @Test
+    void paidIndemnityRaisesThePremiumByTenPercentOncePerClaim() {
+        PolicyResponse policy = createActivePolicy();
+        IndemnityPaidEvent event = new IndemnityPaidEvent(7L, 12L, policy.id(), new BigDecimal("3700.00"),
+                LocalDate.of(2026, 11, 22));
+
+        assertThat(policyService.applyIndemnityPaid(event)).isTrue();
+        assertThat(policyService.applyIndemnityPaid(event)).as("redelivered event").isFalse();
+
+        assertThat(policyService.findPolicy(policy.id()).prime()).isEqualByComparingTo("660.00");
+        assertThat(policyService.findPremiumAdjustments(policy.id()))
+                .singleElement()
+                .satisfies(adjustment -> {
+                    assertThat(adjustment.claimId()).isEqualTo(12L);
+                    assertThat(adjustment.indemnityId()).isEqualTo(7L);
+                    assertThat(adjustment.montantIndemnise()).isEqualByComparingTo("3700.00");
+                    assertThat(adjustment.primeAvant()).isEqualByComparingTo("600.00");
+                    assertThat(adjustment.primeApres()).isEqualByComparingTo("660.00");
+                });
+    }
+
+    @Test
+    void eachPaidClaimRaisesTheCurrentPremium() {
+        PolicyResponse policy = createActivePolicy();
+
+        policyService.applyIndemnityPaid(new IndemnityPaidEvent(7L, 12L, policy.id(), new BigDecimal("3700.00"),
+                LocalDate.of(2026, 11, 22)));
+        policyService.applyIndemnityPaid(new IndemnityPaidEvent(8L, 13L, policy.id(), new BigDecimal("900.00"),
+                LocalDate.of(2026, 11, 23)));
+
+        // 600.00 -> 660.00 -> 726.00
+        assertThat(policyService.findPolicy(policy.id()).prime()).isEqualByComparingTo("726.00");
+        assertThat(policyService.findPremiumAdjustments(policy.id())).hasSize(2);
+    }
+
+    @Test
+    void indemnityOnUnknownPolicyIsIgnored() {
+        IndemnityPaidEvent event = new IndemnityPaidEvent(7L, 12L, 999_999L, new BigDecimal("3700.00"),
+                LocalDate.of(2026, 11, 22));
+
+        assertThat(policyService.applyIndemnityPaid(event)).isFalse();
+        assertThat(premiumAdjustmentRepository.count()).isZero();
     }
 
     private PolicyResponse createActivePolicy() {
