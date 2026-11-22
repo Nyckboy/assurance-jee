@@ -77,6 +77,17 @@ public class GlobalExceptionHandler {
         );
     }
 
+    // Service distant indisponible après les retries, ou Circuit Breaker ouvert.
+    @ExceptionHandler(RemoteServiceUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> handleRemoteServiceUnavailable(
+            RemoteServiceUnavailableException exception) {
+
+        return buildResponse(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                exception.getMessage() + " Réessayez plus tard."
+        );
+    }
+
     @ExceptionHandler(FeignException.class)
     public ResponseEntity<Map<String, Object>> handleFeignException(
             FeignException exception) {
