@@ -1,4 +1,3 @@
-
 package ma.sinistrepro.claims.event;
 
 import ma.sinistrepro.claims.domain.ClaimFile;
@@ -9,8 +8,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
+/**
+ * Marks a claim INDEMNISE when service-indemnites publishes indemnity-paid.
+ *
+ * <p>A message that can never be applied (unreadable, incomplete, unknown claim, other policy, wrong status)
+ * is logged and skipped: retrying it would fail the same way every time.
+ */
 @Component
 public class IndemnityPaidEventConsumer {
 
@@ -33,8 +39,13 @@ public class IndemnityPaidEventConsumer {
     public void consume(String message) {
 
         // Deserialize the exact contract published by service-indemnites.
-        IndemnityPaidEvent event =
-                objectMapper.readValue(message, IndemnityPaidEvent.class);
+        IndemnityPaidEvent event;
+        try {
+            event = objectMapper.readValue(message, IndemnityPaidEvent.class);
+        } catch (JacksonException exception) {
+            LOGGER.error("Skipping unreadable indemnity-paid message: {}", message, exception);
+            return;
+        }
 
         if (event.indemnityId() == null
                 || event.claimId() == null
@@ -44,17 +55,21 @@ public class IndemnityPaidEventConsumer {
                 || event.montantCalcule() == null
                 || event.montantCalcule().signum() < 0
                 || event.dateVirement() == null) {
-            throw new IllegalArgumentException("Invalid indemnity-paid event");
+            LOGGER.error("Skipping invalid indemnity-paid message: {}", message);
+            return;
         }
 
-        ClaimFile claim = claimFileRepository.findById(event.claimId())
-                .orElseThrow(() -> new IllegalStateException(
-                        "Claim not found: " + event.claimId()));
+        ClaimFile claim = claimFileRepository.findById(event.claimId()).orElse(null);
+        if (claim == null) {
+            LOGGER.error("Skipping indemnity {}: claim {} not found", event.indemnityId(), event.claimId());
+            return;
+        }
 
         // Reject events associated with a different insurance policy.
         if (!event.policyId().equals(claim.getPolicyId())) {
-            throw new IllegalStateException(
-                    "Policy mismatch for claim " + event.claimId());
+            LOGGER.error("Skipping indemnity {}: claim {} belongs to policy {}, not {}",
+                    event.indemnityId(), claim.getId(), claim.getPolicyId(), event.policyId());
+            return;
         }
 
         // Kafka may deliver an event more than once.
@@ -65,9 +80,9 @@ public class IndemnityPaidEventConsumer {
 
         // Only an expert-assessed claim can be indemnified.
         if (claim.getStatut() != ClaimStatus.EN_EXPERTISE) {
-            throw new IllegalStateException(
-                    "Invalid claim status for indemnification: "
-                            + claim.getStatut());
+            LOGGER.error("Skipping indemnity {}: claim {} is {}, not EN_EXPERTISE",
+                    event.indemnityId(), claim.getId(), claim.getStatut());
+            return;
         }
 
         // JPA dirty checking persists this change on transaction commit.

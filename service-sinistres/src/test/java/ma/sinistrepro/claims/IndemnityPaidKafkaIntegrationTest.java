@@ -115,18 +115,29 @@ class IndemnityPaidKafkaIntegrationTest {
 
         String payload = objectMapper.writeValueAsString(event);
 
-        // Invoke the consumer directly: an invalid Kafka message would
-        // otherwise enter the listener's retry/error-handling mechanism.
-        assertThrows(
-                IllegalStateException.class,
-                () -> consumer.consume(payload)
-        );
+        // Invoke the consumer directly: a message for another policy is
+        // logged and skipped (retrying it could never succeed).
+        assertDoesNotThrow(() -> consumer.consume(payload));
 
         ClaimFile unchanged = claimFileRepository
                 .findById(claim.getId())
                 .orElseThrow();
 
         assertEquals(ClaimStatus.EN_EXPERTISE, unchanged.getStatut());
+    }
+
+    @Test
+    void unreadableOrUnknownMessagesAreSkipped() {
+        ClaimFile claim = claimFileRepository.save(newClaim());
+
+        assertDoesNotThrow(() -> consumer.consume("not json"));
+        assertDoesNotThrow(() -> consumer.consume("{\"claimId\":" + claim.getId() + "}"));
+        assertDoesNotThrow(() -> consumer.consume(
+                "{\"indemnityId\":12,\"claimId\":999999,\"policyId\":3,"
+                        + "\"montantCalcule\":100.00,\"dateVirement\":\"2026-11-22\"}"));
+
+        assertEquals(ClaimStatus.EN_EXPERTISE,
+                claimFileRepository.findById(claim.getId()).orElseThrow().getStatut());
     }
 
     private KafkaProducer<String, String> newProducer() {
