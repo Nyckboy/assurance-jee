@@ -31,7 +31,7 @@ You can view what a service receives in a browser, for example `http://localhost
 | `api-gateway` | Yes | `config-repo/api-gateway.yml` (routes, actuator exposure) |
 | `service-polices` | Yes | `config-repo/service-polices.properties` (H2 datasource, JPA) |
 | `service-sinistres` | Not yet: owner to connect | — |
-| `service-indemnites` | Not yet: owner to connect | — |
+| `service-indemnites` | Yes | `config-repo/service-indemnites.properties` (Kafka) |
 
 Each connected application keeps only `spring.application.name`, `server.port`, and the config import locally.
 
