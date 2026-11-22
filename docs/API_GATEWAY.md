@@ -18,6 +18,10 @@ The routes are defined in [`config-repo/api-gateway.yml`](../config-repo/api-gat
 
 An `lb://<name>` target is resolved through the [discovery server](DISCOVERY_SERVER.md): the gateway asks Eureka for the registered instances of that service and load-balances across them (round robin). No host or port is written in the routes, so starting a second instance of a service is enough to share the load. If no instance of a service is registered, its route fails with `Unable to find instance for <name>`.
 
+## Each request is forwarded once
+
+The gateway never re-sends a request, even when the service answers `503`. Retries belong to the caller and to the services' own Feign calls (Retry and Circuit Breaker), and re-sending a `POST` could create a resource twice. Apache HttpClient, which the Eureka client brings in, retries some requests by default, so [`GatewayHttpClientConfig`](../api-gateway/src/main/java/ma/sinistrepro/gateway/config/GatewayHttpClientConfig.java) turns that off. `GatewayForwardingTests` checks it.
+
 ## What belongs here
 
 - Public route forwarding
