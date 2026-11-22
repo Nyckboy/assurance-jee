@@ -7,54 +7,52 @@ The diagrams below are written in [Mermaid](https://mermaid.js.org/): GitHub ren
 ## 1. Overall architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
     client(["Client<br/>Postman, frontend"])
+    gateway["api-gateway :8080<br/>routes /api/** to lb://service-name"]
 
-    subgraph infra["Infrastructure"]
-        gateway["api-gateway<br/>:8080"]
-        config["config-server<br/>:8888"]
+    subgraph platform["Platform services"]
+        direction LR
+        config["config-server :8888"] --- repo[("config-repo/")]
         eureka["discovery-server<br/>Eureka :8761"]
-        repo[("config-repo/<br/>*.properties, *.yml")]
     end
 
     subgraph business["Business microservices"]
-        polices["service-polices<br/>:8081"]
-        sinistres["service-sinistres<br/>:8082"]
-        indemnites["service-indemnites<br/>:8083"]
+        direction LR
+        sinistres["service-sinistres :8082"]
+        polices["service-polices :8081"]
+        indemnites["service-indemnites :8083"]
     end
 
-    subgraph data["One database per service (H2)"]
-        dbp[("policiesdb")]
+    subgraph storage["One database per service (H2)"]
+        direction LR
         dbs[("claimsdb")]
+        dbp[("policiesdb")]
         dbi[("indemnitiesdb")]
     end
 
-    kafka{{"Kafka :9092<br/>claim-declared<br/>expertise-completed<br/>indemnity-paid"}}
-    mail["Mailpit / SMTP<br/>:1025"]
+    kafka{{"Kafka :9092"}}
+    mail["Mailpit / SMTP :1025"]
 
-    client -->|"/api/**"| gateway
-    gateway -->|"lb://service-polices"| polices
-    gateway -->|"lb://service-sinistres"| sinistres
-    gateway -->|"lb://service-indemnites"| indemnites
-
-    config --- repo
-    gateway & polices & sinistres & indemnites -.->|"configuration at startup"| config
-    gateway & polices & sinistres & indemnites -.->|"register / discover"| eureka
+    client --> gateway
+    gateway --> business
+    gateway -.->|"configuration, registration"| platform
+    business -.->|"configuration, registration"| platform
 
     sinistres -->|"Feign: coverage"| polices
     indemnites -->|"Feign: montantRetenu"| sinistres
     indemnites -->|"Feign: plafond, franchise"| polices
 
-    sinistres -->|"claim-declared<br/>expertise-completed"| kafka
+    sinistres -->|"claim-declared, expertise-completed"| kafka
     indemnites -->|"indemnity-paid"| kafka
-    kafka -->|"claim-declared<br/>indemnity-paid"| polices
+    kafka -->|"claim-declared, indemnity-paid"| polices
     kafka -->|"expertise-completed"| indemnites
     kafka -->|"indemnity-paid"| sinistres
 
-    polices --- dbp
     sinistres --- dbs
+    polices --- dbp
     indemnites --- dbi
-    polices -->|"email to the policyholder"| mail
+    polices -->|"policyholder emails"| mail
 ```
 
 | Component | Port | Role |
