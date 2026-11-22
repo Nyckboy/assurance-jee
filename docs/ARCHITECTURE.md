@@ -6,54 +6,72 @@ The diagrams below are written in [Mermaid](https://mermaid.js.org/): GitHub ren
 
 ## 1. Overall architecture
 
+### 1.1 Deployment: gateway, platform services, databases
+
 ```mermaid
 flowchart TB
     client(["Client<br/>Postman, frontend"])
-    gateway["api-gateway :8080<br/>routes /api/** to lb://service-name"]
-
-    subgraph platform["Platform services"]
-        direction LR
-        config["config-server :8888"] --- repo[("config-repo/")]
-        eureka["discovery-server<br/>Eureka :8761"]
-    end
+    gateway["api-gateway :8080"]
 
     subgraph business["Business microservices"]
         direction LR
-        sinistres["service-sinistres :8082"]
-        polices["service-polices :8081"]
-        indemnites["service-indemnites :8083"]
+        sinistres["service-sinistres<br/>:8082"]
+        polices["service-polices<br/>:8081"]
+        indemnites["service-indemnites<br/>:8083"]
     end
 
-    subgraph storage["One database per service (H2)"]
+    subgraph platform["Platform services"]
         direction LR
-        dbs[("claimsdb")]
-        dbp[("policiesdb")]
-        dbi[("indemnitiesdb")]
+        config["config-server :8888"]
+        repo[("config-repo/")]
+        eureka["discovery-server<br/>Eureka :8761"]
+        config --- repo
     end
 
-    kafka{{"Kafka :9092"}}
-    mail["Mailpit / SMTP :1025"]
+    dbs[("claimsdb")]
+    dbp[("policiesdb")]
+    dbi[("indemnitiesdb")]
 
-    client --> gateway
-    gateway --> business
-    gateway -.->|"configuration, registration"| platform
-    business -.->|"configuration, registration"| platform
-
-    sinistres -->|"Feign: coverage"| polices
-    indemnites -->|"Feign: montantRetenu"| sinistres
-    indemnites -->|"Feign: plafond, franchise"| polices
-
-    sinistres -->|"claim-declared, expertise-completed"| kafka
-    indemnites -->|"indemnity-paid"| kafka
-    kafka -->|"claim-declared, indemnity-paid"| polices
-    kafka -->|"expertise-completed"| indemnites
-    kafka -->|"indemnity-paid"| sinistres
-
+    client -->|"/api/**"| gateway
+    gateway -->|"lb://service-name"| business
+    business -.->|"configuration at startup,<br/>registration and discovery"| platform
+    gateway -.-> platform
     sinistres --- dbs
     polices --- dbp
     indemnites --- dbi
+```
+
+Every application loads its configuration from `config-server` at startup, then registers with Eureka as `<name>:<port>`. The gateway and the Feign clients find instances through Eureka by name (`lb://`), never by a fixed address. Each service has its own H2 database, and no other service reads it.
+
+### 1.2 Communication between the services
+
+```mermaid
+flowchart LR
+    sinistres["service-sinistres"]
+    polices["service-polices"]
+    indemnites["service-indemnites"]
+    kafka{{"Kafka"}}
+    mail["Mailpit / SMTP"]
+
+    sinistres ==>|"Feign: coverage check"| polices
+    indemnites ==>|"Feign: montantRetenu"| sinistres
+    indemnites ==>|"Feign: plafond, franchise"| polices
+
+    sinistres -.->|"claim-declared<br/>expertise-completed"| kafka
+    indemnites -.->|"indemnity-paid"| kafka
+    kafka -.->|"claim-declared<br/>indemnity-paid"| polices
+    kafka -.->|"expertise-completed"| indemnites
+    kafka -.->|"indemnity-paid"| sinistres
     polices -->|"policyholder emails"| mail
 ```
+
+Thick arrows are synchronous OpenFeign calls; dotted arrows are Kafka events.
+
+| Topic | Producer | Consumers | Effect |
+| --- | --- | --- | --- |
+| `claim-declared` | service-sinistres | service-polices | The policy records the claim and emails the policyholder. |
+| `expertise-completed` | service-sinistres | service-indemnites | The indemnity is calculated. |
+| `indemnity-paid` | service-indemnites (outbox) | service-sinistres, service-polices | The claim becomes `INDEMNISE`; the premium rises 10% and the policyholder is emailed. |
 
 | Component | Port | Role |
 | --- | --- | --- |
