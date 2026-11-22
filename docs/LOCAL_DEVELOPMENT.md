@@ -44,3 +44,13 @@ After all applications report `UP`, run:
 The script creates an active AUTO policy, attaches a COLLISION guarantee, and verifies coverage **through the gateway** at port `8080`. A successful run prints the policy ID, ceiling, and franchise.
 
 For manual testing, use the policy API documentation in [`service-polices/README.md`](../service-polices/README.md). The policy service's temporary H2 console is available at `http://localhost:8081/h2-console` with JDBC URL `jdbc:h2:mem:policiesdb`, user `sa`, and an empty password.
+
+## See the emails (Mailpit)
+
+`service-polices` emails policyholders (claim recorded, indemnity paid) through SMTP on `localhost:1025`. [Mailpit](https://mailpit.axllent.org/) is a local mail server: it catches every email and shows it in a browser inbox, so nothing reaches a real address.
+
+1. Download the Windows build from the [Mailpit releases](https://github.com/axllent/mailpit/releases) (`mailpit-windows-amd64.zip`), and unzip it outside the repository.
+2. Run `mailpit.exe`. It listens for SMTP on port `1025` and serves the inbox at `http://localhost:8025`.
+3. Start the applications. Each email the policy service sends appears in the inbox.
+
+Without Mailpit, the policy service still works: each failed email is logged as a warning. Another SMTP server can be used with `MAIL_HOST` and `MAIL_PORT`.
