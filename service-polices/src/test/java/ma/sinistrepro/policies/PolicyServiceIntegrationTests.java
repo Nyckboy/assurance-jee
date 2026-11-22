@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import ma.sinistrepro.policies.api.CoverageVerificationResponse;
 import ma.sinistrepro.policies.api.GuaranteeRequest;
+import ma.sinistrepro.policies.api.GuaranteeResponse;
 import ma.sinistrepro.policies.api.PolicyRequest;
 import ma.sinistrepro.policies.api.PolicyResponse;
 import ma.sinistrepro.policies.domain.PolicyStatus;
@@ -55,6 +56,22 @@ class PolicyServiceIntegrationTests {
         assertThat(result.covered()).isTrue();
         assertThat(result.plafond()).isEqualByComparingTo("15000.00");
         assertThat(result.franchise()).isEqualByComparingTo("500.00");
+    }
+
+    @Test
+    void addedGuaranteeIsReturnedWithItsIdSoItCanBeUpdatedAndDeleted() {
+        PolicyResponse policy = createActivePolicy();
+
+        GuaranteeResponse added = policyService.addGuarantee(policy.id(), new GuaranteeRequest(
+                "COLLISION", new BigDecimal("15000.00"), new BigDecimal("500.00")));
+
+        assertThat(added.id()).as("id returned by POST /guarantees").isNotNull();
+        GuaranteeResponse updated = policyService.updateGuarantee(policy.id(), added.id(), new GuaranteeRequest(
+                "COLLISION", new BigDecimal("20000.00"), new BigDecimal("500.00")));
+        assertThat(updated.plafond()).isEqualByComparingTo("20000.00");
+
+        policyService.deleteGuarantee(policy.id(), added.id());
+        assertThat(policyService.findPolicy(policy.id()).guarantees()).isEmpty();
     }
 
     @Test
