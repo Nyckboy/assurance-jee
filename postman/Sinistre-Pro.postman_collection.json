@@ -1,0 +1,1499 @@
+{
+  "info": {
+    "_postman_id": "dc6332e3-5203-53a8-ae6c-f0370a934354",
+    "name": "Sinistre-Pro",
+    "description": "Collection de tests de Sinistre-Pro, exécutable dans Postman (Run collection) ou avec Newman.\n\nPrérequis : applications démarrées (scripts/start-all.ps1 -WaitForHealth). Pour le dossier 04 : Kafka (scripts/start-kafka.ps1) et Mailpit.\n\nToutes les requêtes métier passent par l'API Gateway ({{baseUrl}}). Chaque exécution crée ses propres données (email unique), la collection peut donc être rejouée.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Infrastructure (V2-V3)",
+      "description": "Config Server, Eureka et API Gateway. Ces requêtes appellent directement le Config Server (8888) et Eureka (8761) ; toutes les autres passent par la gateway (8080).",
+      "item": [
+        {
+          "name": "Config Server : configuration de chaque service",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{configUrl}}/service-polices,service-sinistres,service-indemnites/default",
+            "description": "Le Config Server sert config-repo/<nom-du-service>.properties puis le fichier partagé application.properties."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Fichiers servis par le Config Server', () => {",
+                  "    const sources = pm.response.json().propertySources.map(source => source.name);",
+                  "    ['service-polices.properties', 'service-sinistres.properties', 'service-indemnites.properties', 'application.properties']",
+                  "        .forEach(file => pm.expect(sources.some(name => name.endsWith(file)), file).to.be.true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Config Server : configuration de la gateway (routes)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{configUrl}}/api-gateway/default"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Routes lb:// vers les trois services', () => {",
+                  "    const text = pm.response.text();",
+                  "    ['lb://service-polices', 'lb://service-sinistres', 'lb://service-indemnites']",
+                  "        .forEach(route => pm.expect(text).to.include(route));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eureka : instances enregistrées",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{eurekaUrl}}/eureka/apps",
+            "description": "Chaque application s'enregistre sous son spring.application.name, avec l'identifiant <nom>:<port>."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "const applications = pm.response.json().applications.application;",
+                  "const expected = {",
+                  "    'API-GATEWAY': 'api-gateway:8080',",
+                  "    'SERVICE-POLICES': 'service-polices:8081',",
+                  "    'SERVICE-SINISTRES': 'service-sinistres:8082',",
+                  "    'SERVICE-INDEMNITES': 'service-indemnites:8083'",
+                  "};",
+                  "Object.entries(expected).forEach(([name, instanceId]) => {",
+                  "    pm.test(`${name} enregistré et UP (${instanceId})`, () => {",
+                  "        const app = applications.find(candidate => candidate.name === name);",
+                  "        pm.expect(app, name).to.exist;",
+                  "        const instances = [].concat(app.instance);",
+                  "        pm.expect(instances.map(instance => instance.instanceId)).to.include(instanceId);",
+                  "        instances.forEach(instance => pm.expect(instance.status).to.eql('UP'));",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gateway : santé",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/actuator/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Gateway UP', () => pm.expect(pm.response.json().status).to.eql('UP'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 - Polices (V1 : CRUD, validation)",
+      "description": "service-polices via la gateway : polices, garanties et vérification de couverture.",
+      "item": [
+        {
+          "name": "Créer une police",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/policies",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"souscripteurEmail\": \"{{runEmail}}\",\n  \"typeCouverture\": \"AUTO\",\n  \"montantCouvert\": 50000.0,\n  \"prime\": 600.0,\n  \"dateEffet\": \"2026-01-01\",\n  \"statut\": \"ACTIVE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chaque exécution utilise un assuré différent (email unique), pour pouvoir rejouer la collection.",
+                  "const runId = Date.now();",
+                  "pm.collectionVariables.set('runId', runId);",
+                  "pm.collectionVariables.set('runEmail', `assure.${runId}@example.com`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));",
+                  "const policy = pm.response.json();",
+                  "pm.test('Police créée', () => {",
+                  "    pm.expect(policy.id).to.be.a('number');",
+                  "    pm.expect(policy.souscripteurEmail).to.eql(pm.collectionVariables.get('runEmail'));",
+                  "    pm.expect(policy.prime).to.eql(600.00);",
+                  "    pm.expect(policy.statut).to.eql('ACTIVE');",
+                  "});",
+                  "pm.test('En-tête Location', () => pm.response.to.have.header('Location'));",
+                  "pm.collectionVariables.set('policyId', policy.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Créer une police invalide (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/policies",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"souscripteurEmail\": \"pas-un-email\",\n  \"typeCouverture\": \"\",\n  \"montantCouvert\": -1\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lister les polices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/policies"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('La police créée est listée', () => {",
+                  "    const ids = pm.response.json().map(policy => policy.id);",
+                  "    pm.expect(ids).to.include(Number(pm.collectionVariables.get('policyId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consulter la police",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/policies/{{policyId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Bonne police', () => pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('policyId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Modifier la police",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/policies/{{policyId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"souscripteurEmail\": \"{{runEmail}}\",\n  \"typeCouverture\": \"AUTO\",\n  \"montantCouvert\": 50000.0,\n  \"prime\": 650.0,\n  \"dateEffet\": \"2026-01-01\",\n  \"statut\": \"ACTIVE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Prime modifiée', () => pm.expect(pm.response.json().prime).to.eql(650.00));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ajouter une garantie COLLISION",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/policies/{{policyId}}/guarantees",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"libelle\": \"COLLISION\",\n  \"plafond\": 15000.0,\n  \"franchise\": 500.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));",
+                  "const guarantee = pm.response.json();",
+                  "pm.test('Garantie créée', () => pm.expect(guarantee.libelle).to.eql('COLLISION'));",
+                  "pm.collectionVariables.set('guaranteeId', guarantee.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Modifier la garantie",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/policies/{{policyId}}/guarantees/{{guaranteeId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"libelle\": \"COLLISION\",\n  \"plafond\": 20000.0,\n  \"franchise\": 500.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Plafond modifié', () => pm.expect(pm.response.json().plafond).to.eql(20000.00));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Vérifier la couverture : COLLISION couverte",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/policies/{{policyId}}/coverage?claimType=COLLISION",
+            "description": "Endpoint appelé par service-sinistres et service-indemnites via OpenFeign."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Couvert avec plafond et franchise', () => {",
+                  "    const coverage = pm.response.json();",
+                  "    pm.expect(coverage.covered).to.be.true;",
+                  "    pm.expect(coverage.plafond).to.eql(20000.00);",
+                  "    pm.expect(coverage.franchise).to.eql(500.00);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Vérifier la couverture : VOL non couvert",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/policies/{{policyId}}/coverage?claimType=VOL"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Non couvert', () => {",
+                  "    const coverage = pm.response.json();",
+                  "    pm.expect(coverage.covered).to.be.false;",
+                  "    pm.expect(coverage.reason).to.eql('No matching guarantee');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Police inexistante (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/policies/999999"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Supprimer la garantie",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/policies/{{policyId}}/guarantees/{{guaranteeId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Supprimer la police",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/policies/{{policyId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "La police supprimée n'existe plus (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/policies/{{policyId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Sinistres (V1 + V4 : vérification Feign)",
+      "description": "service-sinistres via la gateway. Une déclaration appelle service-polices par OpenFeign (nom Eureka service-polices) pour vérifier la couverture avant de créer le sinistre.",
+      "item": [
+        {
+          "name": "Préparer : police assurée",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/policies",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"souscripteurEmail\": \"{{runEmail}}\",\n  \"typeCouverture\": \"AUTO\",\n  \"montantCouvert\": 50000.0,\n  \"prime\": 600.0,\n  \"dateEffet\": \"2026-01-01\",\n  \"statut\": \"ACTIVE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chaque exécution utilise un assuré différent (email unique), pour pouvoir rejouer la collection.",
+                  "const runId = Date.now();",
+                  "pm.collectionVariables.set('runId', runId);",
+                  "pm.collectionVariables.set('runEmail', `assure.${runId}@example.com`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('claimsPolicyId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Préparer : garantie COLLISION",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/policies/{{claimsPolicyId}}/guarantees",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"libelle\": \"COLLISION\",\n  \"plafond\": 15000.0,\n  \"franchise\": 500.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Déclarer un sinistre couvert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/claims",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"policyId\": {{claimsPolicyId}},\n  \"souscripteurEmail\": \"{{runEmail}}\",\n  \"dateSinistre\": \"2026-11-20\",\n  \"type\": \"COLLISION\",\n  \"montantDeclare\": 4200.0\n}"
+            },
+            "description": "Feign → GET /api/policies/{policyId}/coverage. Couvert : le sinistre est créé en DECLARE."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));",
+                  "const claim = pm.response.json();",
+                  "pm.test('Sinistre DECLARE', () => {",
+                  "    pm.expect(claim.statut).to.eql('DECLARE');",
+                  "    pm.expect(claim.montantRetenu).to.be.null;",
+                  "});",
+                  "pm.collectionVariables.set('claimId', claim.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Déclarer un sinistre non couvert (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/claims",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"policyId\": {{claimsPolicyId}},\n  \"souscripteurEmail\": \"{{runEmail}}\",\n  \"dateSinistre\": \"2026-11-20\",\n  \"type\": \"VOL\",\n  \"montantDeclare\": 4200.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Erreur au format commun', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.status).to.eql(422);",
+                  "    pm.expect(body.message).to.include('No matching guarantee');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Déclarer sur une police inexistante (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/claims",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"policyId\": 999999,\n  \"souscripteurEmail\": \"{{runEmail}}\",\n  \"dateSinistre\": \"2026-11-20\",\n  \"type\": \"COLLISION\",\n  \"montantDeclare\": 4200.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Erreur au format commun', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.status).to.eql(400);",
+                  "    pm.expect(body.message).to.include('Insurance policy not found');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Déclaration invalide (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/claims",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"policyId\": -1,\n  \"souscripteurEmail\": \"pas-un-email\",\n  \"type\": \"\",\n  \"montantDeclare\": 0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Tous les champs invalides sont listés', () => {",
+                  "    const message = pm.response.json().message;",
+                  "    ['policyId', 'souscripteurEmail', 'dateSinistre', 'type', 'montantDeclare']",
+                  "        .forEach(field => pm.expect(message).to.include(field));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consulter le sinistre",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/claims/{{claimId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Champs lus par service-indemnites', () => {",
+                  "    const claim = pm.response.json();",
+                  "    ['id', 'policyId', 'souscripteurEmail', 'dateSinistre', 'type', 'montantDeclare', 'montantRetenu', 'statut']",
+                  "        .forEach(field => pm.expect(claim).to.have.property(field));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lister les sinistres",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/claims"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Le sinistre est listé', () => pm.expect(pm.response.json().map(claim => claim.id))",
+                  "    .to.include(Number(pm.collectionVariables.get('claimId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sinistre inexistant (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/claims/999999"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Erreur au format commun', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.status).to.eql(404);",
+                  "    pm.expect(body.message).to.include('Claim not found');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Enregistrer une expertise",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/expertises",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expertNom\": \"Expert Benali\",\n  \"date\": \"2026-11-21\",\n  \"montantEstime\": 4000.0,\n  \"avis\": \"Choc avant, réparable\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Expertise enregistrée', () => pm.expect(pm.response.json().montantEstime).to.eql(4000.00));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Le sinistre passe EN_EXPERTISE",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/claims/{{claimId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('EN_EXPERTISE avec le montant retenu', () => {",
+                  "    const claim = pm.response.json();",
+                  "    pm.expect(claim.statut).to.eql('EN_EXPERTISE');",
+                  "    pm.expect(claim.montantRetenu).to.eql(4000.00);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deuxième expertise refusée (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/expertises",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expertNom\": \"Expert Benali\",\n  \"date\": \"2026-11-21\",\n  \"montantEstime\": 4000.0,\n  \"avis\": \"Choc avant, réparable\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Erreur au format commun', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.status).to.eql(409);",
+                  "    pm.expect(body.message).to.include('current status');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lister les expertises du sinistre",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/claims/{{claimId}}/expertises"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Une expertise', () => pm.expect(pm.response.json()).to.have.lengthOf(1));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Indemnités (V1 : CRUD, validation)",
+      "description": "service-indemnites via la gateway : CRUD d'une indemnité saisie manuellement. Le calcul automatique (Feign vers sinistres et polices) est dans le scénario 04.",
+      "item": [
+        {
+          "name": "Créer une indemnité",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/indemnities",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"claimId\": {{fakeClaimId}},\n  \"montantCalcule\": 3500.0,\n  \"franchiseAppliquee\": 500.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Identifiant de sinistre propre à cette exécution, pour le CRUD manuel (sans appel aux autres services).",
+                  "pm.collectionVariables.set('fakeClaimId', 900000000 + Math.floor(Math.random() * 99999999));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));",
+                  "const indemnity = pm.response.json();",
+                  "pm.test('Indemnité EN_ATTENTE', () => pm.expect(indemnity.statut).to.eql('EN_ATTENTE'));",
+                  "pm.collectionVariables.set('indemnityId', indemnity.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Une seule indemnité par sinistre (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/indemnities",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"claimId\": {{fakeClaimId}},\n  \"montantCalcule\": 3500.0,\n  \"franchiseAppliquee\": 500.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Créer une indemnité invalide (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/indemnities",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"claimId\": -1,\n  \"montantCalcule\": 0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lister les indemnités",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/indemnities"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test(\"L'indemnité est listée\", () => pm.expect(pm.response.json().map(indemnity => indemnity.id))",
+                  "    .to.include(Number(pm.collectionVariables.get('indemnityId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consulter l'indemnité",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/indemnities/{{indemnityId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Modifier l'indemnité",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/indemnities/{{indemnityId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"claimId\": {{fakeClaimId}},\n  \"montantCalcule\": 3600.0,\n  \"franchiseAppliquee\": 500.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Montant modifié', () => pm.expect(pm.response.json().montantCalcule).to.eql(3600.00));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Indemnité inexistante (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/indemnities/999999"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Supprimer l'indemnité",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/indemnities/{{indemnityId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "L'indemnité supprimée n'existe plus (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/indemnities/{{indemnityId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Scénario complet : Feign + Kafka + email (V4-V5)",
+      "description": "Cycle de vie complet d'un sinistre. Prérequis : Kafka (scripts/start-kafka.ps1) et Mailpit démarrés.\n\n1. Déclaration → Feign (couverture) → événement claim-declared → polices enregistre le sinistre → email.\n2. Expertise → événement expertise-completed → indemnites calcule l'indemnité (Feign vers sinistres et polices).\n3. Paiement → événement indemnity-paid → sinistre INDEMNISE et prime +10 % → email.\n\nLes étapes marquées ⏱ attendent eventWaitMs (variable de collection) que les événements soient traités.",
+      "item": [
+        {
+          "name": "1. Créer la police (prime 600.00)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/policies",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"souscripteurEmail\": \"{{runEmail}}\",\n  \"typeCouverture\": \"AUTO\",\n  \"montantCouvert\": 50000.0,\n  \"prime\": 600.0,\n  \"dateEffet\": \"2026-01-01\",\n  \"statut\": \"ACTIVE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chaque exécution utilise un assuré différent (email unique), pour pouvoir rejouer la collection.",
+                  "const runId = Date.now();",
+                  "pm.collectionVariables.set('runId', runId);",
+                  "pm.collectionVariables.set('runEmail', `assure.${runId}@example.com`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('scenarioPolicyId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Ajouter la garantie COLLISION (plafond 15000, franchise 500)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/policies/{{scenarioPolicyId}}/guarantees",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"libelle\": \"COLLISION\",\n  \"plafond\": 15000.0,\n  \"franchise\": 500.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Déclarer le sinistre (4200.00)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/claims",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"policyId\": {{scenarioPolicyId}},\n  \"souscripteurEmail\": \"{{runEmail}}\",\n  \"dateSinistre\": \"2026-11-20\",\n  \"type\": \"COLLISION\",\n  \"montantDeclare\": 4200.0\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('scenarioClaimId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. ⏱ claim-declared : polices a enregistré le sinistre",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/policies/{{scenarioPolicyId}}/claims"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Les événements Kafka sont asynchrones : on laisse le temps aux consommateurs de les traiter.",
+                  "const waitMs = Number(pm.collectionVariables.get('eventWaitMs'));",
+                  "setTimeout(() => {}, waitMs);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Sinistre reçu par service-polices', () => {",
+                  "    const claimIds = pm.response.json().map(claim => claim.claimId);",
+                  "    pm.expect(claimIds).to.include(Number(pm.collectionVariables.get('scenarioClaimId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Mailpit : email « sinistre enregistré »",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{runEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test(\"Email reçu par l'assuré\", () => {",
+                  "    const subjects = pm.response.json().messages.map(message => message.Subject);",
+                  "    const expected = `Sinistre n°${pm.collectionVariables.get('scenarioClaimId')} enregistré`;",
+                  "    pm.expect(subjects.some(subject => subject.startsWith(expected)), subjects.join(' | ')).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Enregistrer l'expertise (montant retenu 4000.00)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/claims/{{scenarioClaimId}}/expertises",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expertNom\": \"Expert Benali\",\n  \"date\": \"2026-11-21\",\n  \"montantEstime\": 4000.0,\n  \"avis\": \"Choc avant, réparable\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. ⏱ expertise-completed : indemnité calculée automatiquement",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/indemnities",
+            "description": "service-indemnites a lu sinistres (montantRetenu) et polices (plafond, franchise) via Feign : min(4000, 15000) - 500 = 3500."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Les événements Kafka sont asynchrones : on laisse le temps aux consommateurs de les traiter.",
+                  "const waitMs = Number(pm.collectionVariables.get('eventWaitMs'));",
+                  "setTimeout(() => {}, waitMs);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "const claimId = Number(pm.collectionVariables.get('scenarioClaimId'));",
+                  "const indemnity = pm.response.json().find(candidate => candidate.claimId === claimId);",
+                  "pm.test('Indemnité calculée : 3500.00 (franchise 500.00)', () => {",
+                  "    pm.expect(indemnity, 'indemnité du sinistre').to.exist;",
+                  "    pm.expect(indemnity.statut).to.eql('CALCULEE');",
+                  "    pm.expect(indemnity.montantCalcule).to.eql(3500.00);",
+                  "    pm.expect(indemnity.franchiseAppliquee).to.eql(500.00);",
+                  "});",
+                  "if (indemnity) {",
+                  "    pm.collectionVariables.set('scenarioIndemnityId', indemnity.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. Payer l'indemnité",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/indemnities/{{scenarioIndemnityId}}/pay"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Indemnité PAYEE', () => pm.expect(pm.response.json().statut).to.eql('PAYEE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "9. ⏱ indemnity-paid : le sinistre est INDEMNISE",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/claims/{{scenarioClaimId}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Les événements Kafka sont asynchrones : on laisse le temps aux consommateurs de les traiter.",
+                  "const waitMs = Number(pm.collectionVariables.get('eventWaitMs'));",
+                  "setTimeout(() => {}, waitMs);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Sinistre INDEMNISE', () => pm.expect(pm.response.json().statut).to.eql('INDEMNISE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10. indemnity-paid : la prime passe à 660.00 (+10 %)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/policies/{{scenarioPolicyId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Prime 660.00', () => pm.expect(pm.response.json().prime).to.eql(660.00));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11. Historique des ajustements de prime",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/policies/{{scenarioPolicyId}}/premium-adjustments"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Un ajustement 600.00 → 660.00 pour 3500.00', () => {",
+                  "    const adjustments = pm.response.json();",
+                  "    pm.expect(adjustments).to.have.lengthOf(1);",
+                  "    pm.expect(adjustments[0].primeAvant).to.eql(600.00);",
+                  "    pm.expect(adjustments[0].primeApres).to.eql(660.00);",
+                  "    pm.expect(adjustments[0].montantIndemnise).to.eql(3500.00);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12. Mailpit : email « indemnité versée »",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{runEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test(\"Email reçu par l'assuré\", () => {",
+                  "    const subjects = pm.response.json().messages.map(message => message.Subject);",
+                  "    const expected = `Indemnité versée pour le sinistre n°${pm.collectionVariables.get('scenarioClaimId')}`;",
+                  "    pm.expect(subjects, subjects.join(' | ')).to.include(expected);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "configUrl",
+      "value": "http://localhost:8888"
+    },
+    {
+      "key": "eurekaUrl",
+      "value": "http://localhost:8761"
+    },
+    {
+      "key": "mailpitUrl",
+      "value": "http://localhost:8025"
+    },
+    {
+      "key": "eventWaitMs",
+      "value": "8000"
+    },
+    {
+      "key": "runId",
+      "value": ""
+    },
+    {
+      "key": "runEmail",
+      "value": ""
+    },
+    {
+      "key": "policyId",
+      "value": ""
+    },
+    {
+      "key": "guaranteeId",
+      "value": ""
+    },
+    {
+      "key": "claimsPolicyId",
+      "value": ""
+    },
+    {
+      "key": "claimId",
+      "value": ""
+    },
+    {
+      "key": "fakeClaimId",
+      "value": ""
+    },
+    {
+      "key": "indemnityId",
+      "value": ""
+    },
+    {
+      "key": "scenarioPolicyId",
+      "value": ""
+    },
+    {
+      "key": "scenarioClaimId",
+      "value": ""
+    },
+    {
+      "key": "scenarioIndemnityId",
+      "value": ""
+    }
+  ]
+}
