@@ -7,7 +7,9 @@ import ma.sinistrepro.policies.api.GuaranteeResponse;
 import ma.sinistrepro.policies.api.PolicyClaimResponse;
 import ma.sinistrepro.policies.api.PolicyRequest;
 import ma.sinistrepro.policies.api.PolicyResponse;
+import ma.sinistrepro.policies.api.PremiumAdjustmentResponse;
 import ma.sinistrepro.policies.event.ClaimDeclaredEvent;
+import ma.sinistrepro.policies.event.IndemnityPaidEvent;
 
 public interface PolicyService {
 
@@ -37,4 +39,14 @@ public interface PolicyService {
     boolean recordDeclaredClaim(ClaimDeclaredEvent event);
 
     List<PolicyClaimResponse> findPolicyClaims(Long policyId);
+
+    /**
+     * Applies the premium rule after an indemnity was paid: the policy premium rises by the configured
+     * rate (policies.premium.increase-rate-per-paid-claim), once per claim, and the policyholder is notified.
+     *
+     * @return false when the event was ignored (unknown policy or claim already applied)
+     */
+    boolean applyIndemnityPaid(IndemnityPaidEvent event);
+
+    List<PremiumAdjustmentResponse> findPremiumAdjustments(Long policyId);
 }

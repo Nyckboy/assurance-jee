@@ -1,5 +1,6 @@
 package ma.sinistrepro.policies.service;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import ma.sinistrepro.policies.api.CoverageVerificationResponse;
@@ -8,16 +9,21 @@ import ma.sinistrepro.policies.api.GuaranteeResponse;
 import ma.sinistrepro.policies.api.PolicyClaimResponse;
 import ma.sinistrepro.policies.api.PolicyRequest;
 import ma.sinistrepro.policies.api.PolicyResponse;
+import ma.sinistrepro.policies.api.PremiumAdjustmentResponse;
 import ma.sinistrepro.policies.domain.Guarantee;
 import ma.sinistrepro.policies.domain.Policy;
 import ma.sinistrepro.policies.domain.PolicyClaim;
 import ma.sinistrepro.policies.domain.PolicyStatus;
+import ma.sinistrepro.policies.domain.PremiumAdjustment;
 import ma.sinistrepro.policies.event.ClaimDeclaredEvent;
+import ma.sinistrepro.policies.event.IndemnityPaidEvent;
 import ma.sinistrepro.policies.repository.GuaranteeRepository;
 import ma.sinistrepro.policies.repository.PolicyClaimRepository;
 import ma.sinistrepro.policies.repository.PolicyRepository;
+import ma.sinistrepro.policies.repository.PremiumAdjustmentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,12 +36,19 @@ public class PolicyServiceImpl implements PolicyService {
     private final PolicyRepository policyRepository;
     private final GuaranteeRepository guaranteeRepository;
     private final PolicyClaimRepository policyClaimRepository;
+    private final PremiumAdjustmentRepository premiumAdjustmentRepository;
+    private final BigDecimal premiumIncreaseRate;
 
     public PolicyServiceImpl(PolicyRepository policyRepository, GuaranteeRepository guaranteeRepository,
-                             PolicyClaimRepository policyClaimRepository) {
+                             PolicyClaimRepository policyClaimRepository,
+                             PremiumAdjustmentRepository premiumAdjustmentRepository,
+                             @Value("${policies.premium.increase-rate-per-paid-claim:0.10}")
+                             BigDecimal premiumIncreaseRate) {
         this.policyRepository = policyRepository;
         this.guaranteeRepository = guaranteeRepository;
         this.policyClaimRepository = policyClaimRepository;
+        this.premiumAdjustmentRepository = premiumAdjustmentRepository;
+        this.premiumIncreaseRate = premiumIncreaseRate;
     }
 
     @Override
@@ -134,6 +147,42 @@ public class PolicyServiceImpl implements PolicyService {
         return policyClaimRepository.findByPolicyIdOrderByDateSinistreDesc(policyId).stream()
                 .map(claim -> new PolicyClaimResponse(claim.getClaimId(), claim.getDateSinistre(), claim.getType(),
                         claim.getMontantDeclare(), claim.getReceivedAt()))
+                .toList();
+    }
+
+    @Override
+    public boolean applyIndemnityPaid(IndemnityPaidEvent event) {
+        Policy policy = policyRepository.findById(event.policyId()).orElse(null);
+        if (policy == null) {
+            log.warn("Ignoring indemnity {} for claim {}: policy {} does not exist", event.indemnityId(),
+                    event.claimId(), event.policyId());
+            return false;
+        }
+        if (premiumAdjustmentRepository.existsByClaimId(event.claimId())) {
+            log.info("Ignoring indemnity {}: claim {} was already applied to the premium", event.indemnityId(),
+                    event.claimId());
+            return false;
+        }
+
+        BigDecimal primeAvant = policy.getPrime();
+        BigDecimal primeApres = policy.increasePrime(premiumIncreaseRate);
+        premiumAdjustmentRepository.save(new PremiumAdjustment(event.claimId(), event.indemnityId(), policy.getId(),
+                event.montantCalcule(), event.dateVirement(), primeAvant, primeApres, Instant.now()));
+        // No mail server yet: the notification to the policyholder is logged.
+        log.info("Notification to {}: indemnity of {} paid for claim {}; premium of policy {} goes from {} to {}",
+                policy.getSouscripteurEmail(), event.montantCalcule(), event.claimId(), policy.getId(), primeAvant,
+                primeApres);
+        return true;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<PremiumAdjustmentResponse> findPremiumAdjustments(Long policyId) {
+        findPolicyEntity(policyId);
+        return premiumAdjustmentRepository.findByPolicyIdOrderByAppliedAtAsc(policyId).stream()
+                .map(adjustment -> new PremiumAdjustmentResponse(adjustment.getClaimId(),
+                        adjustment.getIndemnityId(), adjustment.getMontantIndemnise(), adjustment.getDateVirement(),
+                        adjustment.getPrimeAvant(), adjustment.getPrimeApres(), adjustment.getAppliedAt()))
                 .toList();
     }
 
