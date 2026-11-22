@@ -25,7 +25,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
-import org.springframework.web.server.ResponseStatusException;
+import ma.sinistrepro.claims.exception.InvalidClaimStatusException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -114,7 +114,7 @@ class ExpertiseCompletedKafkaIntegrationTest {
 
             Expertise expertise = newExpertise(claim.getId());
 
-            assertThrows(ResponseStatusException.class,
+            assertThrows(InvalidClaimStatusException.class,
                     () -> expertiseService.createExpertise(expertise));
 
             assertEquals(0, consumer.poll(Duration.ofSeconds(2)).count(),

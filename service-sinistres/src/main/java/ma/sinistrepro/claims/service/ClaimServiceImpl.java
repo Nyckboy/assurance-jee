@@ -4,10 +4,12 @@ import java.util.List;
 
 import feign.FeignException;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
+import ma.sinistrepro.claims.exception.ClaimNotCoveredException;
+import ma.sinistrepro.claims.exception.InvalidRequestException;
+import ma.sinistrepro.claims.exception.PolicyServiceUnavailableException;
+import ma.sinistrepro.claims.exception.ResourceNotFoundException;
 
 import ma.sinistrepro.claims.client.CoverageResponse;
 import ma.sinistrepro.claims.client.PolicyClient;
@@ -41,10 +43,10 @@ public class ClaimServiceImpl implements ClaimService {
     @Transactional(readOnly = true)
     public ClaimFile getClaimById(Long id) {
         if (id == null || id <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid claim ID");
+            throw new InvalidRequestException("Invalid claim ID");
         }
         return claimFileRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Claim not found: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Claim not found: " + id));
     }
 
     @Override
@@ -60,20 +62,21 @@ public class ClaimServiceImpl implements ClaimService {
                 || claim.getType().isBlank()
                 || claim.getMontantDeclare() == null
                 || claim.getMontantDeclare().signum() <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid claim data");
+            throw new InvalidRequestException("Invalid claim data");
         }
 
         final CoverageResponse coverage;
         try {
             coverage = policyClient.verifyCoverage(claim.getPolicyId(), claim.getType());
         } catch (FeignException.NotFound exception) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Insurance policy not found", exception);
+            throw new InvalidRequestException("Insurance policy not found", exception);
         } catch (FeignException exception) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Policy verification unavailable", exception);
+            throw new PolicyServiceUnavailableException("Policy verification unavailable", exception);
         }
 
         if (coverage == null || !coverage.covered()) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Insurance does not cover this claim");
+            throw new ClaimNotCoveredException("Insurance does not cover this claim"
+                    + (coverage == null ? "" : ": " + coverage.reason()));
         }
 
         // Ignore identifiers and mutable status submitted by the caller.

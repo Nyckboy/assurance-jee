@@ -3,10 +3,11 @@ package ma.sinistrepro.claims.service;
 import java.util.List;
 
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
+import ma.sinistrepro.claims.exception.InvalidClaimStatusException;
+import ma.sinistrepro.claims.exception.InvalidRequestException;
+import ma.sinistrepro.claims.exception.ResourceNotFoundException;
 
 import ma.sinistrepro.claims.domain.ClaimFile;
 import ma.sinistrepro.claims.domain.ClaimStatus;
@@ -48,26 +49,17 @@ public class ExpertiseServiceImpl implements ExpertiseService {
                 || expertise.getAvis() == null
                 || expertise.getAvis().isBlank()) {
 
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "Invalid expertise data"
-            );
+            throw new InvalidRequestException("Invalid expertise data");
         }
 
         // Ensure the referenced claim exists.
         ClaimFile claim = claimFileRepository
                 .findById(expertise.getClaimId())
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND,
-                        "Claim not found"
-                ));
+                .orElseThrow(() -> new ResourceNotFoundException("Claim not found: " + expertise.getClaimId()));
 
         // Only declared claims can enter expertise.
         if (claim.getStatut() != ClaimStatus.DECLARE) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "Claim cannot enter expertise from its current status"
-            );
+            throw new InvalidClaimStatusException("Claim cannot enter expertise from its current status");
         }
 
         // Never accept a client-provided expertise identifier.
@@ -101,17 +93,11 @@ public class ExpertiseServiceImpl implements ExpertiseService {
     public List<Expertise> getExpertisesByClaimId(Long claimId) {
 
         if (claimId == null || claimId <= 0) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "Invalid claim ID"
-            );
+            throw new InvalidRequestException("Invalid claim ID");
         }
 
         if (!claimFileRepository.existsById(claimId)) {
-            throw new ResponseStatusException(
-                    HttpStatus.NOT_FOUND,
-                    "Claim not found"
-            );
+            throw new ResourceNotFoundException("Claim not found: " + claimId);
         }
 
         return expertiseRepository.findByClaimId(claimId);

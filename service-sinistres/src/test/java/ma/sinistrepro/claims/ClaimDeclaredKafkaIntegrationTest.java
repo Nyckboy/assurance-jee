@@ -87,7 +87,7 @@ class ClaimDeclaredKafkaIntegrationTest {
                     .thenReturn(new CoverageResponse(3L, "COLLISION", false,
                             "No matching guarantee", null, null));
 
-            assertThrows(org.springframework.web.server.ResponseStatusException.class,
+            assertThrows(ma.sinistrepro.claims.exception.ClaimNotCoveredException.class,
                     () -> claimService.createClaim(newClaim()));
             assertEquals(0, consumer.poll(Duration.ofSeconds(2)).count());
         }
