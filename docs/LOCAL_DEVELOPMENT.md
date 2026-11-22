@@ -45,6 +45,40 @@ The script creates an active AUTO policy, attaches a COLLISION guarantee, and ve
 
 For manual testing, use the policy API documentation in [`service-polices/README.md`](../service-polices/README.md). The policy service's temporary H2 console is available at `http://localhost:8081/h2-console` with JDBC URL `jdbc:h2:mem:policiesdb`, user `sa`, and an empty password.
 
+## Run Kafka
+
+The services exchange events through Kafka on `localhost:9092`:
+
+| Topic | Producer | Consumers |
+| --- | --- | --- |
+| `claim-declared` | `service-sinistres` | `service-polices` |
+| `expertise-completed` | `service-sinistres` | `service-indemnites` |
+| `indemnity-paid` | `service-indemnites` | `service-sinistres`, `service-polices` |
+
+Without a broker the applications still start and answer HTTP requests, but no event is delivered. Kafka 4 runs natively on Windows with Java 17+ (no ZooKeeper, no Docker).
+
+1. Download the binary `kafka_2.13-<version>.tgz` from https://kafka.apache.org/downloads and unpack it to a **short** folder. The scripts below expect `%USERPROFILE%\tools\kafka`:
+
+   ```powershell
+   mkdir $HOME\tools -Force
+   tar -xzf $HOME\Downloads\kafka_2.13-4.4.0.tgz -C $HOME\tools
+   Rename-Item $HOME\tools\kafka_2.13-4.4.0 kafka
+   ```
+
+   A deep folder makes Kafka's Windows scripts fail with "The input line is too long".
+
+2. Start the broker in its own PowerShell window and leave it open:
+
+   ```powershell
+   .\scripts\start-kafka.ps1
+   ```
+
+   The first start formats the storage. Kafka is ready when the log shows `Kafka Server started`. Stop it with Ctrl+C. Use `-KafkaHome <folder>` (or `KAFKA_HOME`) for another installation folder.
+
+3. Start the applications with `.\scripts\start-all.ps1 -WaitForHealth`, in any order relative to Kafka. Topics are created automatically on first use.
+
+To start again from an empty broker, stop Kafka and delete `%USERPROFILE%\tools\kafka-data`. Another broker can be used with `KAFKA_BOOTSTRAP_SERVERS`.
+
 ## See the emails (Mailpit)
 
 `service-polices` emails policyholders (claim recorded, indemnity paid) through SMTP on `localhost:1025`. [Mailpit](https://mailpit.axllent.org/) is a local mail server: it catches every email and shows it in a browser inbox, so nothing reaches a real address.
