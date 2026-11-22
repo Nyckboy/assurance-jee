@@ -46,7 +46,7 @@ Every application loads its configuration from `config-server` at startup, then 
 ### 1.2 Communication between the services
 
 ```mermaid
-flowchart LR
+flowchart TB
     sinistres["service-sinistres"]
     polices["service-polices"]
     indemnites["service-indemnites"]
