@@ -94,8 +94,9 @@ public class PolicyServiceImpl implements PolicyService {
         Policy policy = findPolicyEntity(policyId);
         Guarantee guarantee = new Guarantee(request.libelle(), request.plafond(), request.franchise());
         policy.addGuarantee(guarantee);
-        policyRepository.save(policy);
-        return toGuaranteeResponse(guarantee);
+        // Saving the guarantee itself inserts it now, so the response carries its generated id.
+        // (Saving the already-loaded policy would only insert it at commit, after the response is built.)
+        return toGuaranteeResponse(guaranteeRepository.save(guarantee));
     }
 
     @Override
